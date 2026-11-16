@@ -1,0 +1,209 @@
+/* layout.css —— 骨架：顶部元信息条、模块标签、阶段条、卡列、双栏与宽表容器。 */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, var(--bg) 0%, var(--bg-deep) 100%);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: var(--line-h);
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 8px 12px;
+  z-index: 40;
+}
+.skip-link:focus { left: 12px; top: 8px; }
+
+/* 顶栏：品牌 + 运行元信息（批次号/版本/时间/评估日） */
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 1.35fr);
+  gap: var(--gap-lg);
+  align-items: center;
+  padding: 12px clamp(14px, 3vw, 34px);
+  background: var(--surface);
+  border-bottom: var(--stroke) solid var(--line-strong);
+}
+.brand { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.brand-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 18px;
+}
+.brand-text { min-width: 0; }
+.brand-name { margin: 0; font-weight: 650; letter-spacing: 0.01em; }
+.brand-sub { margin: 2px 0 0; color: var(--ink-muted); font-size: 12px; }
+
+.runmeta {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 16px;
+}
+.runmeta div { min-width: 0; }
+.runmeta dt { color: var(--ink-faint); font-size: 11px; letter-spacing: 0.06em; }
+.runmeta dd {
+  margin: 0;
+  font-family: var(--font-num);
+  font-size: 12px;
+  color: var(--ink-mid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 模块标签 */
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 clamp(14px, 3vw, 34px);
+  background: var(--surface);
+  border-bottom: var(--stroke) solid var(--line);
+  overflow-x: auto;
+}
+.tabs a {
+  padding: 10px 14px;
+  color: var(--ink-mid);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition: color var(--motion) linear, border-color var(--motion) linear;
+}
+.tabs a:hover { color: var(--accent-deep); border-bottom-color: var(--line-strong); }
+.tabs a[aria-current="page"] {
+  color: var(--accent-deep);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+  background: var(--accent-soft);
+}
+.tabs .tabs-meta {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-family: var(--font-num);
+  font-size: 12px;
+}
+
+/* 主区 */
+main {
+  display: grid;
+  gap: var(--gap-lg);
+  align-content: start;
+  padding: var(--gap-lg) clamp(14px, 3vw, 34px) 32px;
+  max-width: 1320px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* 阶段条：顶部进度（L6 骨架标识） */
+.stage-rail {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(140px, 1fr);
+  gap: 6px;
+  overflow-x: auto;
+}
+.stage-rail-item {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  padding: 9px 12px 9px 14px;
+  background: var(--surface);
+  border: var(--stroke) solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+.stage-rail-item::after {
+  content: "";
+  position: absolute;
+  right: -7px;
+  top: 50%;
+  width: 8px;
+  height: var(--stroke);
+  background: var(--line-strong);
+}
+.stage-rail-item:last-child::after { display: none; }
+.stage-rail-item .rail-index {
+  font-family: var(--font-num);
+  font-size: 10px;
+  color: var(--ink-faint);
+  letter-spacing: 0.08em;
+}
+.stage-rail-item .rail-label { font-size: 13px; font-weight: 600; }
+.stage-rail-item .rail-counts {
+  font-family: var(--font-num);
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage-rail-item.is-ok { border-left-color: var(--ok); background: var(--surface); }
+.stage-rail-item.is-failed { border-left-color: var(--bad); background: var(--bad-soft); }
+.stage-rail-item.is-reused { border-left-color: var(--info); background: var(--info-soft); }
+.stage-rail-item.is-current { border-left-color: var(--accent); background: var(--accent-soft); }
+
+/* 阶段卡列 */
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(196px, 1fr));
+  gap: var(--gap);
+}
+
+/* 双栏 */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: var(--gap-lg);
+  align-items: start;
+}
+
+/* 宽表容器：横向滚动，外框不破 */
+.table-wrap {
+  overflow-x: auto;
+  border: var(--stroke) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+/* 页脚 */
+.pagefoot {
+  padding: 14px clamp(14px, 3vw, 34px) 22px;
+  color: var(--ink-muted);
+  font-size: 12px;
+  border-top: var(--stroke) solid var(--line);
+}
+.pagefoot p { margin: 3px 0; }
+.pagefoot code { font-family: var(--font-num); color: var(--ink-mid); }
+
+@media (max-width: 960px) {
+  .topbar { grid-template-columns: minmax(0, 1fr); }
+  .runmeta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

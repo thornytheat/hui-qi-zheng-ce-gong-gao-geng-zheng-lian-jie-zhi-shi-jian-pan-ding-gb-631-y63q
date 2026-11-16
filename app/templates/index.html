@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel panel-actions">
+  <div class="panel-head">
+    <h1>采集运行</h1>
+    
+  </div>
+  <div class="actions">
+    <label class="field">
+      <span>来源</span>
+      <select id="source-select">
+        <option value="all">全部门户（3 个）</option>
+        <option value="portal_a">江阴区工信局</option>
+        <option value="portal_b">江南市科技局</option>
+        <option value="portal_c">园区企服中心</option>
+      </select>
+    </label>
+    <button class="btn btn-primary" id="btn-crawl" type="button">触发采集</button>
+    <button class="btn" id="btn-rerun" type="button" data-batch="{{ batch.batch_id if batch else '' }}"
+            {% if not batch %}disabled{% endif %}>重跑</button>
+    <a class="btn btn-ghost" href="/api/batches/{{ batch.batch_id }}/manifest" target="_blank"
+       {% if not batch %}aria-disabled="true"{% endif %}>运行清单</a>
+  </div>
+  <p class="hint" id="action-hint">相同输入重跑只复用结果。</p>
+</section>
+
+{% if batch and stages %}
+<section class="stage-grid" aria-label="阶段卡">
+  {% for s in stages %}
+  <article class="stage-card is-{{ s.status }}" data-stage="{{ s.stage }}">
+    <header>
+      <h2>{{ s.label }}</h2>
+      <span class="badge badge-{{ s.status }}">{% if s.status == 'ok' %}完成{% elif s.status == 'failed' %}失败{% elif s.status == 'reused' %}复用{% else %}{{ s.status }}{% endif %}</span>
+    </header>
+    <dl class="counters">
+      <div><dt>进</dt><dd class="num">{{ s.in_count }}</dd></div>
+      <div><dt>出</dt><dd class="num">{{ s.out_count }}</dd></div>
+      <div><dt>隔离</dt><dd class="num">{{ s.quarantine_count }}</dd></div>
+    </dl>
+    <p class="stage-note">{{ s.note }}</p>
+    <p class="stage-foot">耗时 {{ s.elapsed_ms }} ms</p>
+    {% if s.status == 'failed' %}
+    <button class="btn btn-danger" type="button" data-retry="{{ batch.batch_id }}">重试该阶段</button>
+    {% endif %}
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+
+<div class="split">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>页面采信诊断</h2>
+      <p class="panel-sub">{{ diagnosis|length }} 项</p>
+    </div>
+    {% if diagnosis %}
+    <div class="table-wrap">
+      <table class="grid">
+        <thead>
+          <tr><th>#</th><th>页面</th><th>类型</th><th>状态</th><th>编码</th><th>声明</th><th class="num">字节</th><th class="num">行</th><th>原因码</th><th>备注</th></tr>
+        </thead>
+        <tbody>
+          {% for p in diagnosis %}
+          <tr class="{% if p.status == 'failed' %}row-fail{% elif p.code %}row-warn{% endif %}">
+            <td class="num">{{ loop.index }}</td>
+            <td class="mono ellipsis" title="{{ p.url }}">{{ p.url | replace('http://sample-site', '') }}</td>
+            <td>{{ p.kind }}</td>
+            <td class="nowrap"><span class="dot dot-{{ p.status }}"></span>{{ p.status }}</td>
+            <td class="mono">{{ p.encoding or '—' }}</td>
+            <td class="mono">{{ p.declared or '—' }}</td>
+            <td class="num">{{ p.bytes }}</td>
+            <td class="num">{{ p.rows }}</td>
+            <td class="nowrap">{% if p.code %}<code class="code">{{ p.code }}</code>{% else %}—{% endif %}</td>
+            <td class="ellipsis" title="{{ p.note }}">{{ p.note or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">还没有采集记录。</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>对账四账</h2>
+      <p class="panel-sub">{% if reconcile %}{{ '平衡' if reconcile.all_balanced else '有差额' }} · {{ reconcile.eval_date }}{% else %}未运行{% endif %}</p>
+    </div>
+    {% if accounts %}
+    <table class="grid compact">
+      <thead><tr><th>账</th><th class="num">输入</th><th>构成</th><th class="num">差额</th><th>结论</th></tr></thead>
+      <tbody>
+        {% for a in accounts %}
+        <tr>
+          <td>{{ a.label }}</td>
+          <td class="num">{{ a['in'] }}</td>
+          <td class="small">{{ a.parts }}</td>
+          <td class="num">{{ a.diff }}</td>
+          <td>{% if a.balanced %}<span class="badge badge-ok">平衡</span>{% else %}<span class="badge badge-bad">不平</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">{{ accounts[0].note }}</p>
+    {% else %}
+    <p class="empty">运行后可看到页账、行账、金额账、清单账四条等式。</p>
+    {% endif %}
+    <dl class="keyvals">
+      <div><dt>表格行</dt><dd class="num">{{ totals.get('rows', '—') }}</dd></div>
+      <div><dt>入链公告</dt><dd class="num">{{ totals.get('accepted', '—') }}</dd></div>
+      <div><dt>政策链</dt><dd class="num">{{ totals.get('chains', '—') }}</dd></div>
+      <div><dt>可申报</dt><dd class="num">{{ totals.get('listed', '—') }}</dd></div>
+      <div><dt>清单合计</dt><dd class="num">{{ totals.get('amount_total', '—') }} 万元</dd></div>
+      <div><dt>隔离原因</dt><dd class="num">{{ totals.get('quarantine_rows', '—') }}</dd></div>
+    </dl>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>运行日志尾</h2>
+    
+  </div>
+  {% if log %}
+  <pre class="logtail" id="logtail">{% for line in log %}{{ line }}
+{% endfor %}</pre>
+  {% else %}
+  <p class="empty">运行日志将在这里追加显示。</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>最近批次</h2>
+    
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th>批次号</th><th>来源</th><th>状态</th><th>失败阶段</th><th>开始</th><th class="num">链</th><th class="num">可申报</th><th>批次键</th></tr></thead>
+      <tbody>
+        {% for b in the_batches %}
+        <tr>
+          <td class="mono">{{ b.batch_id }}</td>
+          <td>{{ b.source }}</td>
+          <td>{{ b.status | status }}</td>
+          <td>{% if b.status == 'failed' %}<code class="code">见批次历史</code>{% else %}—{% endif %}</td>
+          <td class="mono">{{ b.created_at | dt_iso }}</td>
+          <td class="num">—</td>
+          <td class="num">—</td>
+          <td class="mono ellipsis" title="{{ b.batch_key }}">{{ b.batch_key[:16] }}…</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

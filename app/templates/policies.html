@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>可申报政策清单</h1>
+    <p class="panel-sub">{{ data.counts.total }} 条链 · 可申报 {{ data.counts.listed }}</p>
+  </div>
+  <form class="filters" method="get" action="/policies">
+    <label class="field"><span>状态</span>
+      <select name="status">
+        <option value="">全部</option>
+        {% for key, label in chain_status_labels.items() %}
+        <option value="{{ key }}" {% if data.filters.status == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field"><span>公文号/标题包含</span>
+      <input type="search" name="keyword" value="{{ data.filters.keyword }}" placeholder="如 37号 / 智能车间">
+    </label>
+    <button class="btn" type="submit">筛选</button>
+    <a class="btn btn-ghost" href="/policies">清空</a>
+    {% if batch %}<a class="btn btn-ghost" href="/api/export?kind=policies&batch_id={{ batch.batch_id }}">导出清单 CSV</a>{% endif %}
+  </form>
+  <dl class="keyvals">
+    <div><dt>全部链</dt><dd class="num">{{ data.counts.total }}</dd></div>
+    <div><dt>可申报</dt><dd class="num">{{ data.counts.listed }}</dd></div>
+    <div><dt>已撤销</dt><dd class="num">{{ data.counts.voided }}</dd></div>
+    <div><dt>冲突隔离</dt><dd class="num">{{ data.counts.conflict }}</dd></div>
+    <div><dt>已过期</dt><dd class="num">{{ data.counts.expired }}</dd></div>
+    <div><dt>清单合计</dt><dd class="num">{{ data.amount_total | money }}</dd></div>
+  </dl>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>清单（可申报）</h2>
+    <p class="panel-sub">{{ data.listed|length }} 条 · 合计 {{ data.amount_total | money }}</p>
+  </div>
+  {% if data.listed %}
+  <div class="table-wrap">
+    <table class="grid" id="policy-table">
+      <thead>
+        <tr><th>公文号</th><th>标题</th><th class="num">版本</th><th>当前截止</th><th class="num">剩余天数</th><th class="num">资助额度(万元)</th><th>状态</th><th>链</th></tr>
+      </thead>
+      <tbody>
+        {% for c in data.listed | sort(attribute='final_deadline') %}
+        <tr {% if c.expiring_soon %}class="row-warn"{% endif %}>
+          <td class="mono">{{ c.doc_no }}</td>
+          <td><a href="/policies/{{ c.doc_no | urlencode }}">{{ c.title }}</a></td>
+          <td class="num">{{ c.versions }}</td>
+          <td class="mono">{{ c.final_deadline or '待确认' }}</td>
+          <td class="num">{% if c.days_left is not none %}{{ c.days_left }}{% else %}—{% endif %}</td>
+          <td class="num">{% if c.final_amount_wan is not none %}{{ c.final_amount_wan | wan }}{% else %}—{% endif %}</td>
+          <td>{% if c.expiring_soon %}<span class="badge badge-warn">七日内截止</span>{% else %}<span class="badge badge-ok">{{ c.status_label }}</span>{% endif %}</td>
+          <td><a href="/policies/{{ c.doc_no | urlencode }}">版本时间线</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><td colspan="5">合计</td><td class="num">{{ data.amount_total | wan }}</td><td colspan="2">{{ data.listed|length }} 条</td></tr>
+      </tfoot>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">当前没有可申报的链。</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>全部链（含不可申报）</h2>
+    
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th>公文号</th><th>标题</th><th>判定</th><th>当前截止</th><th class="num">额度</th><th>说明</th></tr></thead>
+      <tbody>
+        {% for c in data.chains %}
+        <tr>
+          <td class="mono"><a href="/policies/{{ c.doc_no | urlencode }}">{{ c.doc_no }}</a></td>
+          <td class="ellipsis" title="{{ c.title }}">{{ c.title }}</td>
+          <td><span class="badge badge-{{ 'ok' if c.listed else ('bad' if c.status == 'CONFLICT' else 'muted') }}">{{ c.status_label }}</span></td>
+          <td class="mono">{{ c.final_deadline or '—' }}</td>
+          <td class="num">{% if c.final_amount_wan is not none %}{{ c.final_amount_wan | wan }}{% else %}—{% endif %}</td>
+          <td class="small ellipsis" title="{{ c.note }}">{{ c.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

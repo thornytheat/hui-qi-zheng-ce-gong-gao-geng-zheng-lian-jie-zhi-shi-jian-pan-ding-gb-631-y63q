@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block content %}
+{% if batch %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>复核与回放</h1>
+    <p class="panel-sub">待复核 {{ data.counts.queue }} 条 · 已裁定 {{ data.counts.ruled }} 条</p>
+  </div>
+  <form class="filters" method="get" action="/review">
+    <label class="field"><span>公文号</span>
+      <select name="doc_no">
+        {% for c in data.chains %}
+        <option value="{{ c.doc_no }}" {% if data.filters.doc_no == c.doc_no %}selected{% endif %}>{{ c.doc_no }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn" type="submit">查看回放</button>
+    <a class="btn btn-ghost" href="/api/review?batch_id={{ batch.batch_id }}" target="_blank">复核数据</a>
+  </form>
+  <dl class="keyvals">
+    <div><dt>待复核</dt><dd class="num">{{ data.counts.queue }}</dd></div>
+    <div><dt>已裁定</dt><dd class="num">{{ data.counts.ruled }}</dd></div>
+    <div><dt>改判</dt><dd class="num">{{ data.counts.overridden }}</dd></div>
+    <div><dt>超长链</dt><dd class="num">{{ data.counts.long_chains }}</dd></div>
+    <div><dt>裁定后清单</dt><dd class="num">{{ data.manual_list.count }} 条</dd></div>
+    <div><dt>裁定后合计</dt><dd class="num">{{ data.manual_list.amount | money }}</dd></div>
+  </dl>
+</section>
+
+<div class="split">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>待复核冲突链</h2>
+      <p class="panel-sub">{{ data.counts.queue }} 条 · 候选证据行 {{ data.queue | map(attribute='refs') | map('length') | sum }}</p>
+    </div>
+    {% if data.queue %}
+    <div class="table-wrap">
+      <table class="grid compact">
+        <thead><tr><th>公文号</th><th class="num">版本</th><th>冲突码</th><th>证据行</th><th>状态</th></tr></thead>
+        <tbody>
+          {% for q in data.queue %}
+          <tr {% if data.filters.doc_no == q.doc_no %}class="row-warn"{% endif %}>
+            <td class="mono"><a href="/review?doc_no={{ q.doc_no | urlencode }}">{{ q.doc_no }}</a></td>
+            <td class="num">{{ q.versions }}</td>
+            <td>{% for code in q.codes %}<code class="code">{{ code }}</code> {% endfor %}</td>
+            <td class="mono small">{{ q.refs | join(' / ') }}</td>
+            <td>{% if q.ruled %}<span class="badge badge-ok">已裁定</span>{% else %}<span class="badge badge-warn">待裁定</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">没有待复核的链。</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>已裁定</h2>
+      <p class="panel-sub">{{ data.counts.ruled }} 条 · 改判 {{ data.counts.overridden }} 条</p>
+    </div>
+    {% if data.reviewed %}
+    <div class="table-wrap">
+      <table class="grid compact">
+        <thead><tr><th>公文号</th><th class="num">序号</th><th>裁定人</th><th>重算</th><th class="num">差异</th></tr></thead>
+        <tbody>
+          {% for r in data.reviewed %}
+          <tr title="依据：{{ r.basis }}">
+            <td class="mono"><a href="/review?doc_no={{ r.doc_no | urlencode }}">{{ r.doc_no }}</a></td>
+            <td class="num">{{ r.seq }}</td>
+            <td>{{ r.reviewer }}</td>
+            <td class="nowrap"><span class="badge badge-{{ 'ok' if r.listed else 'muted' }}">{{ r.status_label }}</span> <span class="mono small">{{ r.deadline or '—' }}</span></td>
+            <td class="num">{{ r.diffs | length }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty">还没有裁定记录。</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if data.selected %}
+{% set sel = data.selected %}
+<section class="panel">
+  <div class="panel-head">
+    <p class="crumb"><a href="/policies/{{ sel.doc_no | urlencode }}">政策清单</a> / 公文号</p>
+    <h2 class="mono">{{ sel.doc_no }}</h2>
+    <p class="panel-sub">{{ sel.steps.versions }} 版 · 回放 {{ sel.steps.rows }} 步 · 候选 {{ sel.versions | length }} 行</p>
+  </div>
+  <div class="split">
+    <div class="verdict verdict-{{ 'bad' if sel.auto.status in ('CONFLICT', 'VOIDED', 'EXPIRED') else ('ok' if sel.auto.listed else 'muted') }}">
+      <p class="verdict-label">自动判定</p>
+      <p class="verdict-value">{{ sel.auto.status_label }} · {{ sel.auto.deadline or '待确认' }}</p>
+      <p class="verdict-note">{{ sel.auto.note }}</p>
+    </div>
+    <div class="verdict verdict-{{ 'ok' if sel.ruling and sel.ruling.listed else 'muted' }}">
+      <p class="verdict-label">裁定后</p>
+      {% if sel.ruling %}
+      <p class="verdict-value">{{ sel.ruling.status_label }} · {{ sel.ruling.deadline or '待确认' }}</p>
+      <p class="verdict-note">序号 {{ sel.ruling.seq }} · {{ sel.ruling.reviewer }} · {{ sel.ruling.created_at | dt_iso }}</p>
+      <p class="verdict-note">依据：{{ sel.ruling.basis }}</p>
+      {% else %}
+      <p class="verdict-value">未裁定</p>
+      <p class="verdict-note">冲突链暂不进入清单</p>
+      {% endif %}
+    </div>
+  </div>
+  <dl class="keyvals">
+    <div><dt>回放截止</dt><dd class="mono">{{ sel.replay_state.deadline or '待确认' }}</dd></div>
+    <div><dt>回放额度</dt><dd class="num">{{ sel.replay_state.amount | wan }}</dd></div>
+    <div><dt>回放与链判定</dt><dd>{% if sel.checks.checked %}{{ '一致' if sel.checks.consistent else '不一致' }}{% else %}不比对{% endif %}</dd></div>
+    <div><dt>非法迁移</dt><dd class="num">{{ sel.illegal | length }}</dd></div>
+    <div><dt>超长链</dt><dd>{% if sel.steps.long %}是，上限 {{ sel.steps.limit }}{% else %}否{% endif %}</dd></div>
+  </dl>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>候选与取值</h2>
+    <p class="panel-sub">{{ sel.versions | length }} 行 · 同序号按发文机关页优先</p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th class="num">序号</th><th>类型</th><th>来源</th><th>证据行</th><th class="num">额度</th><th>截止说明</th><th>原文</th><th>取值</th></tr></thead>
+      <tbody>
+        {% for v in sel.versions %}
+        <tr {% if not v.winner %}class="row-warn"{% endif %}>
+          <td class="num">{{ v.seq }}</td>
+          <td>{{ v.kind_label }}</td>
+          <td class="small">{{ v.role_label }}<span class="mono"> {{ v.portal }}</span></td>
+          <td class="mono small">{{ v.row_ref }}</td>
+          <td class="num">{% if v.amount_wan is not none %}{{ v.amount_wan | wan }}{% else %}—{% endif %}</td>
+          <td class="small">{{ v.deadline_spec | spec }}</td>
+          <td class="small ellipsis" title="{% for r in v.raw %}{{ r.label }}={{ r.value }} {% endfor %}">{% for r in v.raw %}{{ r.label }}={{ r.value }} {% endfor %}</td>
+          <td>{% if v.winner %}<span class="badge badge-ok">采用</span>{% else %}<span class="badge badge-muted">让位</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>合并回放</h2>
+    <p class="panel-sub">{{ sel.steps.versions }} 版 → {{ sel.steps.rows }} 步{% if sel.steps.code %} · <code class="code">{{ sel.steps.code }}</code>{% endif %}</p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th class="num">步</th><th class="num">序号</th><th>动作</th><th>说明</th><th>结果</th><th>变化</th><th>证据行</th></tr></thead>
+      <tbody>
+        {% for s in sel.steps.steps %}
+        <tr>
+          <td class="num">{{ s.index }}</td>
+          <td class="num">{{ s.merged_seqs | first }}{% if s.merged > 1 %}–{{ s.merged_to }}{% endif %}</td>
+          <td>{{ s.action }}</td>
+          <td class="small">{{ s.note }}</td>
+          <td class="small mono">{{ s.after.deadline or '—' }} · {{ s.after.amount or '—' }}</td>
+          <td>{% if s.changed %}<span class="badge badge-warn">改</span>{% else %}<span class="badge badge-muted">稳</span>{% endif %}</td>
+          <td class="mono small">{{ s.row_ref or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% if sel.illegal %}
+<section class="panel panel-warn">
+  <div class="panel-head">
+    <h2>非法迁移</h2>
+    <p class="panel-sub">{{ sel.illegal | length }} 条 · 撤销后的版本不能选为有效版</p>
+  </div>
+  <ul class="conflicts">
+    {% for p in sel.illegal %}
+    <li><code class="code">{{ p.code }}</code><span>{{ p.detail }}</span><span class="mono small">{{ p.row_ref or '—' }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>人工裁定</h2>
+    <p class="panel-sub">可选序号 {{ sel.seqs | length }} 个 · 候选 {{ sel.versions | length }} 行</p>
+  </div>
+  <div class="filters">
+    <label class="field"><span>序号</span>
+      <select id="ruling-seq">
+        {% for seq in sel.seqs %}
+        <option value="{{ seq }}">{{ seq }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field"><span>裁定人</span>
+      <input id="ruling-reviewer" type="text" value="{{ sel.ruling.reviewer if sel.ruling else '' }}" placeholder="企服组 6 号窗口">
+    </label>
+    <label class="field"><span>依据</span>
+      <input id="ruling-basis" type="text" value="{{ sel.ruling.basis if sel.ruling else '' }}" placeholder="发文机关页第 2 行，额度 800 万元">
+    </label>
+    <button class="btn btn-primary" id="btn-ruling" type="button" data-doc="{{ sel.doc_no }}">提交裁定</button>
+  </div>
+  <p class="hint" id="ruling-hint">依据写清看了哪一页哪一行。</p>
+  {% if sel.ruling and sel.ruling.diffs %}
+  <table class="grid compact">
+    <thead><tr><th>字段</th><th>自动</th><th>裁定</th></tr></thead>
+    <tbody>
+      {% for d in sel.ruling.diffs %}
+      <tr><td>{{ d.label }}</td><td class="mono">{{ d.auto if d.auto is not none else '—' }}</td><td class="mono">{{ d.manual if d.manual is not none else '—' }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endif %}
+{% else %}
+<section class="panel">
+  <h1>复核与回放</h1>
+  <p class="empty">还没有批次数据。</p>
+</section>
+{% endif %}
+{% endblock %}

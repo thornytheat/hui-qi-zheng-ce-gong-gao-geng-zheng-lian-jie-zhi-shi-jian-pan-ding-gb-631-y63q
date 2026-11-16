@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page_title }} · noticechain</title>
+<link rel="stylesheet" href="/static/theme.css">
+<link rel="stylesheet" href="/static/layout.css">
+<link rel="stylesheet" href="/static/components.css">
+</head>
+<body data-page="{{ page }}" data-batch="{{ batch.batch_id if batch else '' }}">
+<a class="skip-link" href="#main">跳到主内容</a>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">◧</span>
+    <div class="brand-text">
+      <p class="brand-name">noticechain · 惠企政策公告更正链</p>
+      <p class="brand-sub">园区企服组 · 政策公告链</p>
+    </div>
+  </div>
+  <dl class="runmeta">
+    <div><dt>批次号</dt><dd>{{ batch.batch_id if batch else '尚未运行' }}</dd></div>
+    <div><dt>运行号</dt><dd>{{ (batch.run_id if batch else '—') | truncate(26, true, '…') }}</dd></div>
+    <div><dt>生成时间</dt><dd>{{ print_ts }}</dd></div>
+    <div><dt>评估日</dt><dd>{{ eval_date }}</dd></div>
+  </dl>
+</header>
+
+<nav class="tabs" aria-label="模块导航">
+  {% for href, label, key in nav %}
+  <a href="{{ href }}" {% if page == key %}aria-current="page"{% endif %}>{{ label }}</a>
+  {% endfor %}
+  <a class="tabs-meta" href="/api/contract" title="列契约">字段契约</a>
+</nav>
+
+<main id="main">
+  <ol class="stage-rail" aria-label="流水线阶段">
+    {% for key in stage_keys %}
+    {% set rec = (stages|selectattr('stage', 'equalto', key)|list|first) if stages is defined else none %}
+    <li class="stage-rail-item
+        {% if rec %}is-{{ rec.status }}{% elif page == key %}is-current{% endif %}
+        {% if page in ('ingest', 'list', 'quality', 'export') and rec %}is-filled{% endif %}">
+      <span class="rail-index">{{ loop.index }}</span>
+      <span class="rail-label">{{ stage_labels[key] }}</span>
+      {% if rec %}
+      <span class="rail-counts">{{ rec.in_count }} → {{ rec.out_count }}{% if rec.quarantine_count %} · 隔离 {{ rec.quarantine_count }}{% endif %}</span>
+      {% else %}
+      <span class="rail-counts">未运行</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="pagefoot">
+  <p>规则 <code>{{ rule_version }}</code> · 金额万元/2 位 · 时间 UTC+08:00</p>
+</footer>
+
+<script src="/static/pipeline.js" defer></script>
+<script src="/static/tables.js" defer></script>
+<script src="/static/dialogs.js" defer></script>
+</body>
+</html>

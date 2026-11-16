@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block content %}
+{% if chain %}
+<section class="panel">
+  <div class="panel-head">
+    <p class="crumb"><a href="/policies">政策清单</a> / 公文号</p>
+    <h1 class="mono">{{ chain.doc_no }}</h1>
+    <p class="panel-sub">{{ chain.title }}</p>
+  </div>
+  <div class="verdict verdict-{{ 'ok' if chain.listed else ('bad' if chain.status == 'CONFLICT' else 'muted') }}">
+    <p class="verdict-label">当前判定</p>
+    <p class="verdict-value">{{ chain.status_label }}{% if chain.listed %} · 可申报{% endif %}</p>
+    <p class="verdict-note">{{ chain.note }}{% if chain.listed %} · 截止 {{ chain.final_deadline or '待确认' }}{% endif %}</p>
+  </div>
+  <dl class="keyvals">
+    <div><dt>当前截止</dt><dd class="mono">{{ chain.final_deadline or '待确认' }}</dd></div>
+    <div><dt>资助额度</dt><dd class="num">{% if chain.final_amount_wan is not none %}{{ chain.final_amount_wan | money }}{% else %}未登记{% endif %}</dd></div>
+    <div><dt>版本数</dt><dd class="num">{{ chain.versions }}</dd></div>
+    <div><dt>剩余天数</dt><dd class="num">{% if chain.days_left is not none %}{{ chain.days_left }}{% else %}—{% endif %}</dd></div>
+    <div><dt>评估日</dt><dd class="mono">{{ eval_date }}</dd></div>
+  </dl>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>版本时间线</h2>
+    
+  </div>
+  <ol class="timeline">
+    {% for v in chain.versions_detail %}
+    <li class="timeline-item kind-{{ v.kind | lower }}">
+      <div class="timeline-head">
+        <span class="seq">序号 {{ v.seq }}</span>
+        <span class="kind">{{ v.kind | kind }}</span>
+        <time class="mono">{{ v.published_at | localdt }}</time>
+        <span class="portal">{{ v.portal }}</span>
+      </div>
+      <p class="timeline-title">{{ v.title }}</p>
+      <p class="timeline-note">{{ v.note }}</p>
+      <dl class="evidence">
+        <div><dt>证据行</dt><dd class="mono">{{ v.row_ref }}</dd></div>
+        <div><dt>截止说明</dt><dd>{{ v.deadline_spec | spec }}</dd></div>
+        <div><dt>额度</dt><dd class="num">{% if v.amount_wan is not none %}{{ v.amount_wan | wan }} 万元{% else %}哨兵/未登记{% endif %}</dd></div>
+        {% if v.target_field %}<div><dt>更正</dt><dd>{{ target_labels.get(v.target_field, v.target_field) }} → {{ v.target_value }}</dd></div>{% endif %}
+      </dl>
+      <a class="small" href="{{ v.source_url }}" target="_blank" rel="noopener">原始页面</a>
+    </li>
+    {% endfor %}
+  </ol>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>截止推算依据</h2>
+    <p class="panel-sub">周一至周五 − 节假日 + 调休 · [次日, 截止次日)</p>
+  </div>
+  <ol class="trace">
+    {% for line in chain.trace.lines %}
+    <li>{{ line }}</li>
+    {% endfor %}
+  </ol>
+  {% if chain.trace.spec %}
+  <p class="hint">决定该截止的是序号 {{ chain.trace.source_seq }} 的 {{ chain.trace.source_kind }} 版本；换算起点 {{ chain.trace.base }}。</p>
+  {% endif %}
+</section>
+
+{% if chain.conflicts %}
+<section class="panel panel-warn">
+  <div class="panel-head">
+    <h2>链级冲突</h2>
+    <p class="panel-sub">冲突链整链隔离：不猜哪条为准，回源核实后重新采集。</p>
+  </div>
+  <ul class="conflicts">
+    {% for c in chain.conflicts %}
+    <li><code class="code">{{ c.code }}</code><span>{{ c.detail }}</span><span class="mono small">{{ c.refs | join(' / ') }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if chain.quarantine %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>该链相关隔离行</h2>
+    <p class="panel-sub">来自解析、质量与链判定三个阶段的证据行。</p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th>原因码</th><th>阶段</th><th>证据行</th><th>原值</th><th>说明</th></tr></thead>
+      <tbody>
+        {% for q in chain.quarantine %}
+        <tr><td><code class="code">{{ q.code }}</code></td><td>{{ q.stage }}</td><td class="mono">{{ q.row_ref }}</td>
+          <td class="ellipsis" title="{{ q.raw_value }}">{{ q.raw_value }}</td><td class="small">{{ q.detail }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% else %}
+<section class="panel">
+  <h1>公告链详情</h1>
+  <p class="empty">还没有批次数据。</p>
+</section>
+{% endif %}
+{% endblock %}

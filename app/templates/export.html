@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>复核与导出</h1>
+    <p class="panel-sub">CSV · UTF-8 BOM</p>
+  </div>
+  {% if batch %}
+  <div class="actions">
+    {% for e in data.exports %}
+    <a class="btn {% if loop.first %}btn-primary{% else %}btn-ghost{% endif %}"
+       href="/api/export?kind={{ e.kind }}&batch_id={{ batch.batch_id }}">{{ e.label }} · {{ e.suffix }}</a>
+    {% endfor %}
+    <button class="btn" type="button" data-print>打印当前页</button>
+  </div>
+  {% else %}
+  <p class="empty">还没有批次。<a href="/">去采集</a></p>
+  {% endif %}
+</section>
+
+{% if data.reconcile %}
+<section class="panel">
+  <div class="panel-head">
+    <h2>对账四账</h2>
+    <p class="panel-sub">
+      {% if data.reconcile.all_balanced %}四账全部平衡{% else %}存在未解释差额，需回源核对{% endif %}
+      · 规则版本 <code>{{ data.reconcile.rule_version }}</code> · 评估日 {{ data.reconcile.eval_date }}
+    </p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid">
+      <thead><tr><th>账</th><th class="num">输入</th><th>构成</th><th class="num">差额</th><th>结论</th><th>规则</th></tr></thead>
+      <tbody>
+        {% for a in data.accounts %}
+        <tr>
+          <td>{{ a.label }}</td>
+          <td class="num">{{ a['in'] }}</td>
+          <td class="small">{{ a.parts }}</td>
+          <td class="num">{{ a.diff }}</td>
+          <td>{% if a.balanced %}<span class="badge badge-ok">平衡</span>{% else %}<span class="badge badge-bad">不平</span>{% endif %}</td>
+          <td class="small">{{ a.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>运行清单</h2>
+    
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact mono">
+      <thead><tr><th>键</th><th>值</th></tr></thead>
+      <tbody>
+        {% for k, v in data.manifest_rows %}
+        <tr><td>{{ k }}</td><td class="ellipsis" title="{{ v }}">{{ v }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>列契约（{{ contract.contract_version }}）</h2>
+    <p class="panel-sub">{{ contract.columns|length }} 个规范字段 · 去重键 {{ contract.dedupe_key }} · 区间规则 {{ contract.interval.endpoint }}</p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th>字段</th><th>中文名</th><th>类型</th><th>必需</th><th>别名（三门户差异）</th><th>规则</th></tr></thead>
+      <tbody>
+        {% for c in contract.columns %}
+        <tr>
+          <td class="mono">{{ c.name }}</td>
+          <td>{{ c.zh }}</td>
+          <td class="mono">{{ c.kind }}</td>
+          <td>{% if c.required %}是{% else %}否{% endif %}</td>
+          <td class="small">{{ c.aliases | join('、') }}</td>
+          <td class="small">{{ c.note }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">单位换算：{{ contract.decimals.unit_normalization }}；空值哨兵：{{ contract.sentinels | join(' / ') }}。</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>原因码目录</h2>
+    <p class="panel-sub">共 {{ contract.reason_codes|length }} 个稳定原因码，跨模块唯一来源。</p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th>原因码</th><th>级别</th><th>阶段</th><th>结论</th><th>复核建议</th></tr></thead>
+      <tbody>
+        {% for r in contract.reason_codes %}
+        <tr>
+          <td class="mono">{{ r.code }}</td>
+          <td>{{ r.level_label }}</td>
+          <td>{{ r.stage }}</td>
+          <td class="small">{{ r.title }}</td>
+          <td class="small">{{ r.hint }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

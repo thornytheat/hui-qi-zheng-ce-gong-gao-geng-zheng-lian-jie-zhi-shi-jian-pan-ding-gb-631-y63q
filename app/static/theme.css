@@ -1,0 +1,53 @@
+/* theme.css —— 只有设计令牌：L6 流水线看板，青灰 195°，浅灰底，中密度。
+   本文件不写选择器，页面结构在 layout.css，元件在 components.css。 */
+:root {
+  /* 底与面 */
+  --bg: #eef2f3;
+  --bg-deep: #e3eaec;
+  --surface: #ffffff;
+  --surface-2: #f5f8f9;
+  --surface-3: #e7eef0;
+  /* 文字 */
+  --ink: #16282d;
+  --ink-mid: #3c545c;
+  --ink-muted: #6b8189;
+  --ink-faint: #96a8ad;
+  /* 线 */
+  --line: #d5dfe2;
+  --line-strong: #aabdc2;
+  --line-accent: #0f6f86;
+  /* 主色（青灰 195°）与应用色 */
+  --accent: #0f6f86;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcebee;
+  --accent-deep: #0a5262;
+  /* 状态色：通过=绿、警告=琥珀、失败=红、未知=灰 */
+  --ok: #1c7a52;
+  --ok-soft: #dcefe5;
+  --warn: #9a6508;
+  --warn-soft: #f6ecd6;
+  --bad: #a52a2a;
+  --bad-soft: #f7dede;
+  --info: #2b5f8a;
+  --info-soft: #dfeaf3;
+  --muted: #6b8189;
+  /* 字族 */
+  --font-ui: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --font-num: "SF Mono", "Consolas", "Liberation Mono", monospace;
+  --font-doc: "Songti SC", "SimSun", serif;
+  /* 尺度与密度 */
+  --radius: 7px;
+  --radius-sm: 3px;
+  --radius-pill: 999px;
+  --pad: 14px;
+  --pad-lg: 20px;
+  --gap: 14px;
+  --gap-lg: 22px;
+  --stroke: 1px;
+  --line-h: 1.62;
+  --shadow: 0 1px 2px rgba(22, 40, 45, 0.06), 0 6px 18px rgba(22, 40, 45, 0.04);
+  --shadow-none: none;
+  --motion: 130ms;
+  --rail-w: 100%;
+  --table-head: var(--surface-2);
+}

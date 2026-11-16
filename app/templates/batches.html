@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>批次历史与续跑</h1>
+    
+  </div>
+  <div class="actions">
+    <a class="btn" href="/">回到采集运行</a>
+    <a class="btn btn-ghost" href="/api/batches">批次 JSON</a>
+  </div>
+</section>
+
+{% for row in rows %}
+<section class="panel batch-card">
+  <div class="panel-head">
+    <h2 class="mono">{{ row.batch_id }}</h2>
+    <p class="panel-sub">
+      来源 {{ row.source }} · 状态 <span class="badge badge-{{ 'ok' if row.status == 'done' else 'bad' }}">{{ row.status | status }}</span>
+      · 开始 {{ row.created_at | dt_iso }}{% if row.finished_at %} · 结束 {{ row.finished_at | dt_iso }}{% endif %}
+      {% if row.resume_of %} · 续跑自 <span class="mono">{{ row.resume_of }}</span>{% endif %}
+    </p>
+  </div>
+  <dl class="keyvals">
+    <div><dt>运行号</dt><dd class="mono ellipsis" title="{{ row.run_id }}">{{ row.run_id }}</dd></div>
+    <div><dt>批次键</dt><dd class="mono ellipsis" title="{{ row.batch_key }}">{{ row.batch_key[:24] }}…</dd></div>
+    <div><dt>页面</dt><dd class="num">{{ row.rows.get('pages', 0) }}</dd></div>
+    <div><dt>公告</dt><dd class="num">{{ row.rows.get('announcements', 0) }}</dd></div>
+    <div><dt>隔离</dt><dd class="num">{{ row.rows.get('quarantine', 0) }}</dd></div>
+    <div><dt>链</dt><dd class="num">{{ row.rows.get('chains', 0) }}</dd></div>
+  </dl>
+  <ol class="mini-rail">
+    {% for s in row.stages %}
+    <li class="is-{{ s.status }}"><span class="mini-label">{{ s.label }}</span><span class="mini-note">{{ s.in_count }}→{{ s.out_count }}</span></li>
+    {% endfor %}
+  </ol>
+  <p class="stage-note">{{ row.note }}</p>
+  <div class="actions">
+    {% if row.resumable %}
+    <button class="btn btn-primary" type="button" data-resume="{{ row.batch_id }}">断点续跑</button>
+    {% endif %}
+    <button class="btn" type="button" data-rerun-batch="{{ row.batch_id }}">重跑</button>
+    <a class="btn btn-ghost" href="/?batch_id={{ row.batch_id }}">查看该批次看板</a>
+    <a class="btn btn-ghost" href="/api/batches/{{ row.batch_id }}/manifest" target="_blank">运行清单</a>
+  </div>
+  {% if plans.get(row.batch_id) %}
+  <p class="hint">续跑计划：{{ plans[row.batch_id].note }}
+    {% if plans[row.batch_id].from_stage %}（失败阶段 {{ stage_labels[plans[row.batch_id].from_stage] }}，复用页面 {{ plans[row.batch_id].reused_pages }} 个）{% endif %}
+  </p>
+  {% endif %}
+</section>
+{% endfor %}
+
+{% if not rows %}
+<section class="panel">
+  <p class="empty">还没有批次。<a href="/">去采集</a></p>
+</section>
+{% endif %}
+
+<div class="dialog-mask" id="op-result" hidden>
+  <div class="dialog-body">
+    <h2>操作结果</h2>
+    <pre class="logtail small" id="op-result-body"></pre>
+    <menu><button class="btn" type="button" data-close-op>关闭</button></menu>
+  </div>
+</div>
+{% endblock %}

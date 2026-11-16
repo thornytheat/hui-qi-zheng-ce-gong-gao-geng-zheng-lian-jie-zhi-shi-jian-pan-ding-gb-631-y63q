@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>隔离区与原因分布</h1>
+    <p class="panel-sub">{{ payload.total }} 条</p>
+  </div>
+  <dl class="keyvals">
+    <div><dt>隔离行</dt><dd class="num">{{ payload.total }}</dd></div>
+    <div><dt>隔离（error）</dt><dd class="num">{{ payload.by_level.error }}</dd></div>
+    <div><dt>提示（warn）</dt><dd class="num">{{ payload.by_level.warn }}</dd></div>
+    <div><dt>记录（info）</dt><dd class="num">{{ payload.by_level.info }}</dd></div>
+    <div><dt>当前筛选</dt><dd class="num">{{ payload.filtered }}</dd></div>
+  </dl>
+  {% if batch %}
+  <div class="actions">
+    <a class="btn" href="/api/quarantine/export.csv?batch_id={{ batch.batch_id }}">导出隔离 CSV</a>
+    <a class="btn btn-ghost" href="/api/quarantine?batch_id={{ batch.batch_id }}">JSON</a>
+    <a class="btn btn-ghost" href="/export">查看对账四账</a>
+  </div>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>原因码分布</h2>
+    
+  </div>
+  {% if payload.distribution %}
+  <ul class="bars">
+    {% for d in payload.distribution %}
+    <li>
+      <a class="bar-label" href="/quarantine?code={{ d.code }}&batch_id={{ batch.batch_id if batch else '' }}">
+        <code class="code">{{ d.code }}</code>
+        <span class="bar-title">{{ d.title }}</span>
+      </a>
+      <span class="bar-track"><span class="bar-fill level-{{ d.level }}" style="width: {{ d.width }}%"></span></span>
+      <span class="bar-num num">{{ d.count }}</span>
+      <span class="bar-share num">{{ d.share }}%</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">当前批次没有隔离行。</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>隔离明细</h2>
+    <p class="panel-sub">
+      筛选：{% if payload.filters.code %}<code class="code">{{ payload.filters.code }}</code>{% else %}全部原因码{% endif %}
+      · {% if payload.filters.stage %}{{ payload.filters.stage }} 阶段{% else %}全部阶段{% endif %}
+    </p>
+  </div>
+  <form class="filters" method="get" action="/quarantine">
+    {% if batch %}<input type="hidden" name="batch_id" value="{{ batch.batch_id }}">{% endif %}
+    <label class="field"><span>阶段</span>
+      <select name="stage">
+        <option value="">全部</option>
+        {% for key in stage_keys %}
+        <option value="{{ key }}" {% if payload.filters.stage == key %}selected{% endif %}>{{ stage_labels[key] }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field"><span>级别</span>
+      <select name="level">
+        <option value="">全部</option>
+        <option value="error" {% if payload.filters.level == 'error' %}selected{% endif %}>隔离</option>
+        <option value="warn" {% if payload.filters.level == 'warn' %}selected{% endif %}>提示</option>
+        <option value="info" {% if payload.filters.level == 'info' %}selected{% endif %}>记录</option>
+      </select>
+    </label>
+    <label class="field"><span>原因码</span>
+      <input type="search" name="code" value="{{ payload.filters.code }}" placeholder="Q_COLUMN_COUNT">
+    </label>
+    <button class="btn" type="submit">筛选</button>
+    <a class="btn btn-ghost" href="/quarantine">清空</a>
+  </form>
+  {% if payload.rows %}
+  <div class="table-wrap">
+    <table class="grid" id="quarantine-table">
+      <thead><tr><th>原因码</th><th>级别</th><th>阶段</th><th>门户</th><th>证据行</th><th>字段</th><th>原值</th><th>说明</th><th>操作</th></tr></thead>
+      <tbody>
+        {% for q in payload.rows %}
+        <tr>
+          <td><code class="code">{{ q.code }}</code></td>
+          <td><span class="badge badge-{{ 'bad' if q.level == 'error' else ('warn' if q.level == 'warn' else 'muted') }}">{{ q.level | level }}</span></td>
+          <td>{{ q.stage }}</td>
+          <td>{{ q.portal or '—' }}</td>
+          <td class="mono ellipsis" title="{{ q.row_ref }}">{{ q.row_ref }}</td>
+          <td class="mono">{{ q.field or '—' }}</td>
+          <td class="ellipsis" title="{{ q.raw_value }}">{{ q.raw_value or '—' }}</td>
+          <td class="small">{{ q.detail }}</td>
+          <td><button class="btn btn-mini" type="button"
+                data-evidence data-code="{{ q.code }}" data-ref="{{ q.row_ref }}"
+                data-value="{{ q.raw_value or '' }}" data-detail="{{ q.detail }}"
+                data-level="{{ q.level }}">证据</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">没有符合条件的隔离行。放宽筛选或先运行一次采集。</p>
+  {% endif %}
+</section>
+
+<dialog id="evidence-dialog" class="dialog">
+  <form method="dialog">
+    <h2>隔离证据</h2>
+    <dl class="keyvals">
+      <div><dt>原因码</dt><dd><code class="code" id="ev-code"></code></dd></div>
+      <div><dt>级别</dt><dd id="ev-level"></dd></div>
+      <div><dt>证据行</dt><dd class="mono" id="ev-ref"></dd></div>
+      <div><dt>原值</dt><dd class="mono" id="ev-value"></dd></div>
+    </dl>
+    <p id="ev-detail" class="small"></p>
+    <p class="hint">原因码目录：<code>/api/contract</code> · reason_codes</p>
+    <menu><button class="btn" value="close">关闭</button></menu>
+  </form>
+</dialog>
+{% endblock %}
