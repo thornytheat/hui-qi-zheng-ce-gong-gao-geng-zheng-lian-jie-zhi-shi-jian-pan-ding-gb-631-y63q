@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <p class="crumb"><a href="/quota">额度账本</a> / 资金池</p>
+    <h1 class="mono">{{ snap.pool_id }}</h1>
+    <p class="panel-sub">
+      {{ snap.title }} · 状态
+      <span class="badge badge-{{ 'bad' if snap.status == 'VOIDED' else 'ok' }}">
+        {{ '已撤销' if snap.status == 'VOIDED' else '有效' }}</span>
+      · 当前版本 v{{ snap.current_version_no if snap.current_version_no else '—' }}
+    </p>
+  </div>
+  <dl class="keyvals">
+    <div><dt>当前总额</dt><dd class="num">{{ snap.current_total_wan | money }}</dd></div>
+    <div><dt>当前占用</dt><dd class="num">{{ snap.current_occupied_wan | money }}</dd></div>
+    <div><dt>可用余额（新申报）</dt><dd class="num"><strong>{{ snap.available_wan | money }}</strong></dd></div>
+    <div><dt>超额缺口</dt><dd class="num">{% if snap.gap_wan > 0 %}<span class="badge badge-bad">{{ snap.gap_wan | money }}</span>{% else %}0.00 万元{% endif %}</dd></div>
+    <div><dt>全池占用</dt><dd class="num">{{ snap.total_occupied_wan | money }}</dd></div>
+    <div><dt>回执/超占/挂起</dt><dd class="num">{{ snap.receipt_total }} / {{ snap.overshoot_total }} / {{ snap.pending_total }}</dd></div>
+  </dl>
+  <div class="actions">
+    <a class="btn btn-ghost" href="/api/quota/export?kind=quota_versions&pool_id={{ snap.pool_id | urlencode }}">版本账 CSV</a>
+    <a class="btn btn-ghost" href="/api/quota/export?kind=quota_receipts&pool_id={{ snap.pool_id | urlencode }}">回执账 CSV</a>
+    <a class="btn btn-ghost" href="/api/quota/pools/{{ snap.pool_id | urlencode }}" target="_blank">明细 JSON</a>
+    <a class="btn" href="/quota">返回看板</a>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>公告版本时间线（含切换失败留痕）</h2>
+    <p class="panel-sub">已受理项目钉在原版本占用；更正只移动当前指针，不重算旧受理</p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th class="num">版本</th><th>类型</th><th class="num">总额</th>
+        <th>发布时间(+08:00)</th><th>到达时间(+08:00)</th><th>公文号</th>
+        <th>状态</th><th>拒绝原因 / 说明</th><th>证据行</th></tr></thead>
+      <tbody>
+        {% for v in snap.version_views %}
+        <tr {% if v.is_current %}class="row-warn"{% endif %}>
+          <td class="num mono">v{{ v.version_no }}{% if v.is_current %} ★{% endif %}</td>
+          <td><span class="kind kind-{{ 'cancel' if v.kind == '撤销' else ('correct' if v.kind == '更正' else '') }}">{{ v.kind }}</span></td>
+          <td class="num">{{ v.total_wan | wan }}</td>
+          <td class="small mono">{{ v.published_at | localdt }}</td>
+          <td class="small mono">{{ v.received_at | localdt if v.received_at else '—' }}</td>
+          <td class="mono small">{{ v.doc_no or '—' }}</td>
+          <td><span class="badge badge-ok">生效</span></td>
+          <td class="small">占用 {{ v.occupied_wan | wan }} · 可用 {{ v.available_wan | wan }} · 缺口 {{ v.gap_wan | wan }}</td>
+          <td class="mono small">{{ v.receipts | length }} 笔钉版</td>
+        </tr>
+        {% endfor %}
+        {% if snap.void_event %}
+        <tr class="row-warn">
+          <td class="num mono">v{{ snap.void_event.version_no }}{% if snap.current_version_no == snap.void_event.version_no %} ★{% endif %}</td>
+          <td><span class="kind kind-cancel">{{ snap.void_event.kind }}</span></td>
+          <td class="num">{{ snap.void_event.total_wan | wan }}</td>
+          <td class="small mono">{{ snap.void_event.published_at | localdt }}</td>
+          <td class="small mono">{{ snap.void_event.received_at | localdt }}</td>
+          <td class="mono small">{{ snap.void_event.doc_no or '—' }}</td>
+          <td><span class="badge badge-bad">撤销生效</span></td>
+          <td class="small">资金池作废，不再受理新申报；旧受理仍按钉版留痕</td>
+          <td class="mono small">{{ snap.void_event.row_ref or '—' }}</td>
+        </tr>
+        {% endif %}
+        {% for v in snap.rejected_versions %}
+        <tr>
+          <td class="num mono">v{{ v.version_no }}</td>
+          <td>{{ v.kind }}</td>
+          <td class="num">{{ v.total_wan | wan }}</td>
+          <td class="small mono">{{ v.published_at | localdt }}</td>
+          <td class="small mono">{{ v.received_at | localdt }}</td>
+          <td class="mono small">{{ v.doc_no or '—' }}</td>
+          <td><span class="badge badge-bad">已拒绝</span></td>
+          <td class="small"><code class="code">{{ v.reject_code }}</code> {{ v.reject_detail }}</td>
+          <td class="mono small">{{ v.row_ref or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>版本视角占用（逐项对上）</h2>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th class="num">钉版</th><th class="num">总额</th>
+        <th class="num">钉版占用</th><th class="num">回执笔数</th>
+        <th class="num">超占笔数</th><th class="num">可用</th><th class="num">缺口</th></tr></thead>
+      <tbody>
+        {% for v in snap.version_views %}
+        <tr {% if v.is_current %}class="row-warn"{% endif %}>
+          <td class="num mono">v{{ v.version_no }}{% if v.is_current %}（当前）{% endif %}</td>
+          <td class="num">{{ v.total_wan | wan }}</td>
+          <td class="num">{{ v.occupied_wan | wan }}</td>
+          <td class="num">{{ v.receipt_count }}</td>
+          <td class="num">{{ v.overshoot_count }}</td>
+          <td class="num">{{ v.available_wan | wan }}</td>
+          <td class="num">{{ v.gap_wan | wan }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>受理回执清单（逐项钉版）</h2>
+    <p class="panel-sub">重跑不重复占用：同一回执摘要只产生一条占用</p>
+  </div>
+  <div class="table-wrap">
+    <table class="grid compact">
+      <thead><tr><th>回执号</th><th>企业</th><th class="num">受理金额</th>
+        <th>受理时间(+08:00)</th><th>到达时间(+08:00)</th><th>状态</th>
+        <th class="num">钉版</th><th>超占</th><th>说明</th><th>证据行</th></tr></thead>
+      <tbody>
+        {% for v in snap.version_views %}
+        {% for r in v.receipts %}
+        <tr>
+          <td class="mono">{{ r.receipt_no }}</td>
+          <td>{{ r.enterprise }}</td>
+          <td class="num">{{ r.amount_wan | wan }}</td>
+          <td class="small mono">{{ r.accepted_at | localdt }}</td>
+          <td class="small mono">{{ r.received_at | localdt }}</td>
+          <td><span class="badge badge-ok">已受理</span></td>
+          <td class="num mono">v{{ r.pegged_version_no }}</td>
+          <td>{% if r.overshoot %}<span class="badge badge-warn">超占</span>{% else %}否{% endif %}</td>
+          <td class="small">{{ r.note }}</td>
+          <td class="mono small">{{ r.row_ref or '—' }}</td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+        {% for r in snap.pending %}
+        <tr class="row-warn">
+          <td class="mono">{{ r.receipt_no }}</td>
+          <td>{{ r.enterprise }}</td>
+          <td class="num">{{ r.amount_wan | wan }}</td>
+          <td class="small mono">{{ r.accepted_at | localdt }}</td>
+          <td class="small mono">{{ r.received_at | localdt }}</td>
+          <td><span class="badge badge-warn">挂起</span></td>
+          <td class="num">—</td><td>—</td>
+          <td class="small"><code class="code">{{ r.pending_reason }}</code> 等首发版本后续跑匹配</td>
+          <td class="mono small">{{ r.row_ref or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>事件留痕</h2></div>
+  <div class="table-wrap">
+    <table class="grid compact mono">
+      <thead><tr><th>运行</th><th>动作</th><th>原因码</th><th>说明</th><th>时间</th></tr></thead>
+      <tbody>
+        {% for e in snap.events %}
+        <tr>
+          <td class="small">{{ e.run_id }}</td>
+          <td>{{ e.action }}</td>
+          <td><code class="code">{{ e.code }}</code></td>
+          <td class="small">{{ e.detail }}</td>
+          <td class="small">{{ e.created_at | localdt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

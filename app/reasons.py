@@ -151,6 +151,49 @@ REASONS = {
     "M_NO_SUCH_SEQ": _r(
         "M_NO_SUCH_SEQ", ERROR, "review",
         "选定的公告序号不在该链内", "先看回放表里实际有哪些序号"),
+    # ---- M8 额度账本 ----
+    "F_DUP_EVENT": _r(
+        "F_DUP_EVENT", INFO, "quota",
+        "事件内容摘要已处理，幂等跳过", "重跑不重复占用：同一事实只生效一次"),
+    "F_VERSION_APPLIED": _r(
+        "F_VERSION_APPLIED", INFO, "quota",
+        "额度公告版本校验通过并切换", "旧受理仍钉在原版本，新申报按更正后总额看可用余额"),
+    "F_VERSION_REJECTED": _r(
+        "F_VERSION_REJECTED", ERROR, "quota",
+        "额度更正校验失败，保留上一完整额度版本", "当前版本指针不动，失败版本留 reject 证据可复核"),
+    "F_VERSION_DUP_SEQ": _r(
+        "F_VERSION_DUP_SEQ", ERROR, "quota",
+        "同一版本序号出现不同总额", "不猜哪条为准，拒绝切换并保留上一完整版本"),
+    "F_VERSION_INVERSION": _r(
+        "F_VERSION_INVERSION", ERROR, "quota",
+        "更正公告发布时间早于当前版本", "时间倒挂，拒绝切换并保留上一完整版本"),
+    "F_VERSION_BAD_TOTAL": _r(
+        "F_VERSION_BAD_TOTAL", ERROR, "quota",
+        "额度总额无法归一为非负万元数", "回源核对单位与数字，拒绝切换"),
+    "F_VERSION_BAD_KIND": _r(
+        "F_VERSION_BAD_KIND", ERROR, "quota",
+        "额度公告类型不在 首发/更正/撤销 之内", "新类型需先扩展额度版本规则"),
+    "F_RECEIPT_APPLIED": _r(
+        "F_RECEIPT_APPLIED", INFO, "quota",
+        "受理回执已钉版并占用资金", "钉在受理时刻有效的额度版本，后续更正不重算旧受理"),
+    "F_RECEIPT_OVERSHOOT": _r(
+        "F_RECEIPT_OVERSHOOT", WARN, "quota",
+        "受理时已超过钉版总额，记超额缺口", "受理事实保留，缺口为正，后续可用余额不再增加"),
+    "F_RECEIPT_PENDING": _r(
+        "F_RECEIPT_PENDING", WARN, "quota",
+        "回执先于任何额度公告到达，挂起不占用", "补齐首发版本后续跑自动匹配，不按到达顺序覆盖事实"),
+    "F_RECEIPT_RESOLVED": _r(
+        "F_RECEIPT_RESOLVED", INFO, "quota",
+        "挂起回执在续跑中匹配到额度版本", "按受理时刻钉版，重跑不产生第二条占用"),
+    "F_RECEIPT_BAD_AMOUNT": _r(
+        "F_RECEIPT_BAD_AMOUNT", ERROR, "quota",
+        "受理金额无法归一为正数万元", "回源核对回执金额，该回执不进入占用"),
+    "F_RECEIPT_VOID_POOL": _r(
+        "F_RECEIPT_VOID_POOL", ERROR, "quota",
+        "资金池已撤销后到达的受理回执", "撤销后的池不再受理，回执隔离不占用"),
+    "F_RUN_INTERRUPTED": _r(
+        "F_RUN_INTERRUPTED", WARN, "quota",
+        "额度处理在事件中途中断", "已确认的更正/受理已落库，续跑只处理收件箱 pending"),
 }
 
 

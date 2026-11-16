@@ -1,6 +1,6 @@
 # 深度登记 noticechain（惠企政策公告更正链与截止时间判定）
 
-- 规模：中型（7 个功能模块 / 7 个页面 / 96 条测试）
+- 规模：中型（8 个功能模块 / 8 个页面 / 115 条测试）
 - 核心规则一：**公告链合并**——同一 `doc_no` 的公告按 `公告序号` 成链，更正覆盖指定字段、延期顺延截止、撤销作废；链内重复序号、时间倒挂、父公告缺失一律整链隔离，给出稳定原因码与证据行，不猜哪条为准。
 - 核心规则二：**工作日截止推算**——`自发布之日起 N 个工作日` 按「周一至周五 − 法定节假日 + 调休上班日」逐日推进，发布日不计入，计数区间左闭右开 `[发布日次日, 截止日次日)`。
 - 使用者与工作流：园区企服组 6 人每天盯 3 个门户，原先手工抄截止日期到表格，更正公告常被漏看；现在一次采集即可得到「当前有效截止 + 可申报清单 + 冲突隔离」，并逐条可复核。
@@ -16,6 +16,7 @@
 | M5 批次与续跑 | 查历史、断点续跑、同源幂等重跑 | GET /api/batches、页面 /batches | `app/modules/m5_batches/resume.py` `app/modules/m5_batches/state.py` `app/modules/m5_batches/service.py` | `tests/test_batches.py` |
 | M6 复核与导出 | 确认四账，导出清单/隔离/清单文件 | GET /api/export、页面 /export | `app/modules/m6_export/csv_out.py` `app/modules/m6_export/manifest_out.py` `app/modules/m6_export/service.py` | `tests/test_export.py` |
 | M7 复核与回放 | 看冲突链、按公告号回放、写人工裁定与依据 | GET /api/review、GET /api/review/replay、POST /api/review/ruling、页面 /review | `app/modules/m7_review/review.py` `app/modules/m7_review/replay.py` `app/modules/m7_review/service.py` | `tests/test_m7_review.py` |
+| M8 额度账本 | 事件收件、处理/续跑、看版本时间线与占用快照、新申报预检、导出五账 | POST /api/quota/process、POST /api/quota/resume、GET /api/quota/dashboard、GET /api/quota/precheck、页面 /quota | `app/modules/m8_quota/ledger.py` `app/modules/m8_quota/events.py` `app/modules/m8_quota/service.py` `app/modules/m8_quota/export.py` | `tests/test_quota.py` |
 
 端到端：`tests/test_e2e.py`（样例站 → 采信 → 链判定 → 清单 → 导出 → 复核回放，含 4xx 失败输入与幂等重跑）。
 
@@ -37,6 +38,13 @@
 | TRAP-23 | `自发布之日起 30 个工作日` 的截止端点在不在区间内 | 两端都算，相邻区间重复计入一天 | 声明左闭右开 `[发布日次日, 截止日次日)`，扣除节假日、计入调休 | `app/modules/m4_chain/workdays.py` | `tests/test_chain.py::test_workday_interval_is_half_open` |
 | TRAP-27 | 冲突链人工裁定与自动判定不同（自动整链隔离，人工选 800 万那版） | 只改状态或只留最终值，事后看不出原自动判定是什么 | 以人工结论重算并记 `M_MANUAL_OVERRIDE`，快照同时留 `auto_status`/`auto_amount`/`auto_deadline` 与逐字段差异 | `app/modules/m7_review/service.py`、`app/modules/m7_review/review.py` | `tests/test_m7_review.py::test_manual_ruling_overrides_conflict_and_keeps_both_values` |
 | TRAP-28 | 撤销（序号 2）之后又出现更正（序号 3） | 后到版本照常覆盖，已作废的链被复活成可申报 | 迁移表把撤销后的 发布/更正/延期 判为非法迁移，该版不能被选为有效版（`M_ILLEGAL_TRANSITION`，409）；M4 侧只登记 `C_AFTER_CANCEL`，链仍为已撤销 | `app/modules/m7_review/review.py`、`app/modules/m4_chain/chain.py` | `tests/test_m7_review.py::test_correction_after_cancel_is_illegal_transition` |
+| TRAP-31 | 额度更正晚到，直接把总额从 1000 覆盖成 800 | 已受理的 900 万旧受理被重算成「超占 100」 | 受理回执钉在受理时刻有效的额度版本（pegged_version_no），更正只移动当前版本指针；旧受理留在 v1 视角核算，新申报只看当前版本可用余额 | `app/modules/m8_quota/ledger.py` | `tests/test_quota.py::test_naive_overwrite_would_misclassify_old_acceptance` |
+| TRAP-32 | 冻结总额不让新申报用更正后额度 | 新申报一直按旧 1000 万执行，更正永远不生效 | 当前版本视图独立核算：当前总额 − 当前版本钉版占用 = 新申报可用余额；与旧版本视角并存不互相覆盖 | `app/modules/m8_quota/ledger.py` | `tests/test_quota.py::test_correction_keeps_old_receipts_pegged_and_new_apply_sees_new_total` |
+| TRAP-33 | 更正公告校验失败（时间倒挂/同序号冲突）却已切指针 | 半切换状态：总额换了但证据不完整 | 版本先校验后落库，失败版本落 rejected 留证据（原因码+说明+证据行），池指针保留上一完整额度版本不动；applied 版本走部分唯一索引，同池同序号至多一条 | `app/modules/m8_quota/ledger.py`、`app/store.py` | `tests/test_quota.py::test_time_inversion_rejected_keeps_previous_version` |
+| TRAP-34 | 受理回执比首发公告先到，按到达顺序处理找不到池 | 报错丢事实，或挂到错误版本上 | 回执先进收件箱保持 pending（`F_RECEIPT_PENDING`），不占用任何版本；首发落库后的运行末尾全局扫挂起，按受理时刻钉版；续跑只动 pending 行 | `app/modules/m8_quota/service.py` | `tests/test_quota.py::test_receipt_before_first_version_pends_then_resume_matches` |
+| TRAP-35 | 处理中断后续跑，已受理事件被再算一遍 | 同一回执产生两条占用，占用虚高 | 事件内容摘要唯一（事实字段进摘要、簿记字段不进），收件箱逐条标记 done/pending；续跑只取 pending，已落库摘要命中即 `F_DUP_EVENT` 跳过；无新事实不产生运行流水 | `app/modules/m8_quota/events.py`、`app/modules/m8_quota/service.py` | `tests/test_quota.py::test_rerun_is_idempotent_no_new_rows`、`tests/test_quota.py::test_interrupted_run_resumes_without_double_occupation` |
+| TRAP-36 | 受理时已超额（申请 2100，总额 2000） | 可用余额算成 −100，或直接拒收丢失受理事实 | 受理事实保留并记 overshoot，超额缺口 = 占用 − 总额（正值），可用余额截到 0 不展示负数；预检接口给新申报预计缺口 | `app/modules/m8_quota/ledger.py` | `tests/test_quota.py::test_overshoot_records_gap_and_keeps_acceptance_fact` |
+| TRAP-37 | 清单与导出各算一套，合计对不上 | 页面一个数、CSV 另一个数 | 页面、API、五类导出共用 `pool_snapshot`/`reconcile` 同一结果；对账恒等式「当前总额 = 当前占用 + 可用 − 缺口」「全池占用 = 各版本钉版占用之和」差额非 0 显式不平 | `app/modules/m8_quota/export.py`、`app/modules/m8_quota/ledger.py` | `tests/test_quota.py::test_reconcile_identity_and_export_line_items` |
 
 ## 对账规则
 
@@ -46,11 +54,15 @@
 - 清单账：入链公告数 = 每条链版本数之和；链最终金额 = 清单 + 未入清单
 - 四账在 `GET /api/reconcile`、`/export` 页面与 `reconcile.json` 导出中显示，差额非 0 会显式为「不平」。
 - 复核账：裁定后清单条数与合计由留痕快照重算，与自动清单并存；两者的字段差异逐条列在改判差异里，不覆盖自动值。
+- 额度账（M8）：当前总额 = 当前占用 + 可用余额 − 超额缺口（超占时可用截 0）；全池占用 = 各额度版本钉版占用之和 = 回执账 CSV 逐项金额求和；任一差额非 0 显式「不平」。
+- 钉版账（M8）：每条 applied 回执恰好钉在一个额度版本上（受理时刻已发布版本中序号最大者）；版本更正不改变任何旧回执的 pegged_version_no。
 
 ## 反例与不变量
 
 - 反例（朴素实现会挂）：`tests/test_chain.py::test_naive_weekday_count_differs`（只数周一至周五得到 2026-11-09，正确是 2026-11-13）、`tests/test_ingest.py::test_naive_splitlines_breaks_records`、`tests/test_parse.py::test_naive_float_parse_would_raise`、`tests/test_chain.py::test_naive_last_write_wins_would_revive_cancelled_chain`（撤销后的更正仍不能复活链）、`tests/test_m7_review.py::test_long_chain_compresses_without_changing_conclusion`（逐版覆盖会把作废链算成最后一版金额）。
 - 不变量：`tests/test_batches.py::test_idempotent_rerun_adds_no_rows`（幂等）、`tests/test_quality.py::test_reconcile_amounts_invariant_holds`（守恒）、`tests/test_ingest.py::test_page_account_identity`（页账守恒）、`tests/test_m7_review.py::test_replay_state_matches_chain_for_every_chain`（回放与链判定一致）、`tests/test_m7_review.py::test_ruling_rerun_keeps_single_trail`（裁定留痕幂等）。
+- M8 反例：`tests/test_quota.py::test_naive_overwrite_would_misclassify_old_acceptance`（直接覆盖总额会把旧受理误判超占）、`tests/test_quota.py::test_arrival_order_does_not_change_facts`（打乱到达顺序终态一致）。
+- M8 不变量：`tests/test_quota.py::test_rerun_is_idempotent_no_new_rows`（重跑不新增运行/回执/占用）、`tests/test_quota.py::test_resume_final_state_equals_uninterrupted_run`（中断续跑终态等于一次跑完）、`tests/test_quota.py::test_reconcile_identity_and_export_line_items`（对账与导出逐项闭合）。
 - 端到端：`tests/test_e2e.py::test_full_pipeline_end_to_end`。
 
 ## 已知不覆盖
@@ -61,3 +73,5 @@
 - 只做单机 SQLite 与串行采集；没有并发抓取、限流与重试退避（内部 6 人使用场景下不需要）。
 - 裁定只记「人名 + 依据」文本，没有登录态与权限校验（内部 6 人共用一台机器，人事后靠名字追）。
 - 裁定后清单是**独立视图**，不回写 `chains` 表；重新采集会生成新批次，旧裁定留在旧批次里，跨批次比对需要人工带批次号。
+- 额度账本（M8）只做单资金池串行处理与单机 SQLite，没有并发申报锁、额度审批流与跨池调剂；受理即超占只记缺口不拦截，是否停办由窗口按缺口人工决定。
+- M8 挂起回执只在「处理运行末尾 / 续跑」时重新匹配，没有外部定时器；撤销池的历史受理仍保留在钉版版本里可复核，但不进入当前可用核算。

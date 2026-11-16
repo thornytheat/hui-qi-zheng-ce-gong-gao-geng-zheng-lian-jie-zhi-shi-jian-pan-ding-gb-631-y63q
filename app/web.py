@@ -20,6 +20,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 NAV = (
     ("/", "采集运行", "ingest"),
     ("/policies", "政策清单", "chain"),
+    ("/quota", "额度账本", "quota"),
     ("/quarantine", "隔离区", "quality"),
     ("/review", "复核回放", "review"),
     ("/batches", "批次历史", "batches"),

@@ -75,3 +75,44 @@
 - 留痕：一次裁定写一条记录（`rulings` 表，按批次 + 公文号唯一），快照同时含人工结论、自动结论（`auto_status` / `auto_amount` / `auto_deadline` / `auto_listed`）、逐字段差异与原因码 `M_MANUAL_OVERRIDE`（改判）/ `M_RULING_RECORDED`（一致）。
 - 超长链：版本数 >20 时回放给压缩视图（`M_LONG_CHAIN`），只把「没有改变状态」的连续版本合并成一步，结论字段不变。
 - 裁定后清单 = 已裁定且人工结论为「在清单内」的链，与自动清单并存，两者差异逐条列出，不互相覆盖。
+
+## 10 额度账本（M8）
+
+### 10.1 事件输入（`POST /api/quota/process`，`events` 数组）
+
+| event_type | 规范字段 | 类型 | 必需 | 含义与归一 |
+|---|---|---|---|---|
+| `quota_version` | `pool_id` | 字符串 | 是 | 资金池标识，池间完全独立核算 |
+| | `version_no` | 正整数 | 是 | 公告版本序号；同池同序号至多一条 applied，冲突落 rejected |
+| | `kind` | 枚举 | 是 | `首发` / `更正` / `撤销`（接受 首次发布/作废 等别名） |
+| | `total_wan` | Decimal(万元,0.01) | 是 | 额度总额；非负，全角/千分位归一；撤销版写 0 |
+| | `published_at` | 时刻(UTC) | 是 | 公告发布时刻，钉版与时间倒挂校验的基准 |
+| | `doc_no` / `source_url` / `row_ref` | 文本 | 否 | 证据定位，随版本留痕 |
+| `quota_receipt` | `pool_id` / `receipt_no` / `enterprise` | 字符串 | 是 | 资金池、回执号（池内唯一）、申报企业 |
+| | `amount_wan` | Decimal(万元,0.01) | 是 | 受理金额，必须为正；为负/哨兵/不可解析 → 该条 invalid |
+| | `accepted_at` | 时刻(UTC) | 是 | **受理时刻**（不是到达时刻），决定钉哪个版本 |
+| | `source_url` / `row_ref` | 文本 | 否 | 证据定位 |
+
+- 事件摘要 `digest = sha256(类型 + 排序后的规范事实)`；`received_at`、`run_id` 等簿记字段不进摘要，
+  同一事实重放摘要必然相同 → 幂等。
+- 字段级错误逐条计入 `invalid`，不污染收件箱；未知 `event_type` 是请求级错误返回 400。
+
+### 10.2 落库表（`quota_*`，金额均为 TEXT Decimal）
+
+| 表 | 粒度 | 关键状态 |
+|---|---|---|
+| `quota_pools` | 一个资金池一行 | `current_version_no` 当前指针；`ACTIVE` / `VOIDED` |
+| `quota_versions` | 一个版本一行（applied 与 rejected 各占行） | applied 部分唯一索引 `(pool_id, version_no)`；rejected 带 `reject_code/reject_detail` |
+| `quota_receipts` | 一个回执一行 | `applied`（带 `pegged_version_no`、`overshoot`）/ `pending`（等首发）/ `rejected`（撤销池） |
+| `quota_inbox` | 一个事件摘要一行 | `pending` / `done`；断点续跑只取 pending |
+| `quota_runs` / `quota_events` | 处理运行 / 逐条事件留痕 | run 带 `cursor_digest` 游标与各项计数 |
+
+### 10.3 核算口径
+
+- **钉版**：回执钉在 `published_at ≤ accepted_at` 的 applied 版本中序号最大者；早于首发 → pending。
+- **版本视角**：版本占用 = 钉在该版本的回执金额和；缺口 = max(0, 占用 − 版本总额)；可用 = max(0, 总额 − 占用)。
+- **当前视角（新申报）**：可用 = 当前版本总额 − 当前版本钉版占用；旧版本占用不重算进新余额。
+- **撤销池**：当前总额/占用归零，撤销后到达的回执按 `F_RECEIPT_VOID_POOL` 隔离；历史钉版留痕可查。
+- **恒等式**：当前总额 = 当前占用 + 可用 − 缺口；全池占用 = Σ 各版本钉版占用 = 回执账 CSV 逐项和。
+- 五类导出：`quota_versions` / `quota_receipts` / `quota_snapshot` / `quota_events`（CSV，UTF-8 BOM）
+  与 `quota_reconcile`（JSON），与页面共用同一 snapshot/reconcile 结果。

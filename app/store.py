@@ -74,6 +74,61 @@ CREATE TABLE IF NOT EXISTS rulings (
 CREATE TABLE IF NOT EXISTS manifests (
     batch_id TEXT PRIMARY KEY, json TEXT NOT NULL
 );
+-- ============ M8 额度账本（额度版本 / 受理回执 / 收件箱 / 运行 / 事件留痕） ============
+CREATE TABLE IF NOT EXISTS quota_pools (
+    pool_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'ACTIVE',
+    current_version_no INTEGER,
+    created_at TEXT NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS quota_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pool_id TEXT NOT NULL, version_no INTEGER NOT NULL,
+    kind TEXT NOT NULL, total_wan TEXT NOT NULL,
+    published_at TEXT NOT NULL, received_at TEXT NOT NULL,
+    doc_no TEXT NOT NULL DEFAULT '', source_url TEXT NOT NULL DEFAULT '',
+    row_ref TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+    reject_code TEXT NOT NULL DEFAULT '', reject_detail TEXT NOT NULL DEFAULT '',
+    digest TEXT NOT NULL, applied_at TEXT,
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_quota_versions_pool ON quota_versions(pool_id, version_no);
+CREATE INDEX IF NOT EXISTS idx_quota_versions_status ON quota_versions(pool_id, status);
+CREATE TABLE IF NOT EXISTS quota_receipts (
+    pool_id TEXT NOT NULL, receipt_no TEXT NOT NULL,
+    enterprise TEXT NOT NULL, amount_wan TEXT NOT NULL,
+    accepted_at TEXT NOT NULL, received_at TEXT NOT NULL,
+    source_url TEXT NOT NULL DEFAULT '', row_ref TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL, pegged_version_no INTEGER,
+    overshoot INTEGER NOT NULL DEFAULT 0, pending_reason TEXT NOT NULL DEFAULT '',
+    digest TEXT NOT NULL UNIQUE, applied_at TEXT,
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (pool_id, receipt_no)
+);
+CREATE INDEX IF NOT EXISTS idx_quota_receipts_status ON quota_receipts(pool_id, status);
+CREATE TABLE IF NOT EXISTS quota_inbox (
+    digest TEXT NOT NULL PRIMARY KEY,
+    event_type TEXT NOT NULL, payload_json TEXT NOT NULL,
+    received_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    run_id TEXT, note TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS quota_runs (
+    run_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT,
+    cursor_digest TEXT, input_digest TEXT NOT NULL,
+    processed INTEGER NOT NULL DEFAULT 0, skipped INTEGER NOT NULL DEFAULT 0,
+    versions_applied INTEGER NOT NULL DEFAULT 0, versions_rejected INTEGER NOT NULL DEFAULT 0,
+    receipts_applied INTEGER NOT NULL DEFAULT 0, receipts_pending INTEGER NOT NULL DEFAULT 0,
+    note TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS quota_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL, digest TEXT NOT NULL, event_type TEXT NOT NULL,
+    action TEXT NOT NULL, code TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -83,6 +138,14 @@ class Store:
         Path(self.path).resolve().parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            # 部分唯一索引与旧版 sqlite 的 IF EXISTS 解析器不兼容，存在性手动判断
+            exists = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='index' "
+                "AND name='idx_quota_versions_applied_uniq'").fetchone()
+            if not exists:
+                conn.execute(
+                    "CREATE UNIQUE INDEX idx_quota_versions_applied_uniq "
+                    "ON quota_versions(pool_id, version_no) WHERE status = 'applied'")
 
     @contextmanager
     def connect(self):
@@ -357,6 +420,225 @@ class Store:
                     f"SELECT COUNT(*) AS n FROM {table} WHERE batch_id=?", (batch_id,)
                 ).fetchone()["n"]
         return out
+
+    # ============ M8 额度账本 ============
+    def quota_upsert_pool(self, pool: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO quota_pools (pool_id,title,status,current_version_no,
+                        created_at,note) VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(pool_id) DO UPDATE SET
+                     title=excluded.title, status=excluded.status,
+                     current_version_no=excluded.current_version_no, note=excluded.note""",
+                (pool["pool_id"], pool["title"], pool.get("status", "ACTIVE"),
+                 pool.get("current_version_no"), pool["created_at"], pool.get("note", "")))
+
+    def quota_get_pool(self, pool_id: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM quota_pools WHERE pool_id=?", (pool_id,)).fetchone()
+        return dict(row) if row else None
+
+    def quota_list_pools(self) -> list[dict]:
+        return self._all("SELECT * FROM quota_pools ORDER BY pool_id", ())
+
+    def quota_set_pool_pointer(self, pool_id: str, version_no: int | None,
+                               status: str | None = None) -> None:
+        with self.connect() as conn:
+            if status is None:
+                conn.execute(
+                    "UPDATE quota_pools SET current_version_no=? WHERE pool_id=?",
+                    (version_no, pool_id))
+            else:
+                conn.execute(
+                    "UPDATE quota_pools SET current_version_no=?, status=? WHERE pool_id=?",
+                    (version_no, status, pool_id))
+
+    def quota_save_version(self, version: dict) -> None:
+        """落版本：applied 与 rejected 各占一行（部分唯一索引保证同池同序号至多一条 applied）。
+
+        同摘要重放（F_DUP_EVENT）走幂等更新，不新增行。
+        """
+        with self.connect() as conn:
+            existing = conn.execute(
+                "SELECT id FROM quota_versions WHERE digest=?",
+                (version["digest"],)).fetchone()
+            if existing is not None:
+                conn.execute(
+                    "UPDATE quota_versions SET status=?, reject_code=?, reject_detail=?, "
+                    "applied_at=?, note=? WHERE id=?",
+                    (version["status"], version.get("reject_code", ""),
+                     version.get("reject_detail", ""), version.get("applied_at"),
+                     version.get("note", ""), existing["id"]))
+                return
+            conn.execute(
+                """INSERT INTO quota_versions (pool_id,version_no,kind,total_wan,published_at,
+                        received_at,doc_no,source_url,row_ref,status,reject_code,reject_detail,
+                        digest,applied_at,note)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (version["pool_id"], int(version["version_no"]), version["kind"],
+                 str(version["total_wan"]), version["published_at"], version["received_at"],
+                 version.get("doc_no", ""), version.get("source_url", ""),
+                 version.get("row_ref", ""), version["status"],
+                 version.get("reject_code", ""), version.get("reject_detail", ""),
+                 version["digest"], version.get("applied_at"), version.get("note", "")))
+
+    def quota_load_versions(self, pool_id: str) -> list[dict]:
+        rows = self._all(
+            "SELECT * FROM quota_versions WHERE pool_id=? ORDER BY version_no, id",
+            (pool_id,))
+        for r in rows:
+            r["total_wan"] = _dec(r["total_wan"])
+        return rows
+
+    def quota_get_version(self, pool_id: str, version_no: int) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM quota_versions WHERE pool_id=? AND version_no=? "
+                "AND status='applied' ORDER BY id LIMIT 1",
+                (pool_id, version_no)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["total_wan"] = _dec(item["total_wan"])
+        return item
+
+    def quota_save_receipt(self, receipt: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO quota_receipts (pool_id,receipt_no,enterprise,amount_wan,
+                        accepted_at,received_at,source_url,row_ref,status,pegged_version_no,
+                        overshoot,pending_reason,digest,applied_at,note)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(pool_id,receipt_no) DO UPDATE SET
+                     status=excluded.status, pegged_version_no=excluded.pegged_version_no,
+                     overshoot=excluded.overshoot, pending_reason=excluded.pending_reason,
+                     applied_at=excluded.applied_at, note=excluded.note""",
+                (receipt["pool_id"], receipt["receipt_no"], receipt["enterprise"],
+                 str(receipt["amount_wan"]), receipt["accepted_at"], receipt["received_at"],
+                 receipt.get("source_url", ""), receipt.get("row_ref", ""),
+                 receipt["status"],
+                 None if receipt.get("pegged_version_no") is None
+                 else int(receipt["pegged_version_no"]),
+                 1 if receipt.get("overshoot") else 0,
+                 receipt.get("pending_reason", ""), receipt["digest"],
+                 receipt.get("applied_at"), receipt.get("note", "")))
+
+    def quota_load_receipts(self, pool_id: str) -> list[dict]:
+        rows = self._all(
+            "SELECT * FROM quota_receipts WHERE pool_id=? ORDER BY accepted_at, receipt_no",
+            (pool_id,))
+        for r in rows:
+            r["amount_wan"] = _dec(r["amount_wan"])
+            r["overshoot"] = bool(r["overshoot"])
+        return rows
+
+    def quota_get_receipt_by_digest(self, digest: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM quota_receipts WHERE digest=?", (digest,)).fetchone()
+        if row is None:
+            return None
+        item = dict(row)
+        item["amount_wan"] = _dec(item["amount_wan"])
+        item["overshoot"] = bool(item["overshoot"])
+        return item
+
+    def quota_pending_receipts(self, pool_id: str) -> list[dict]:
+        rows = self._all(
+            "SELECT * FROM quota_receipts WHERE pool_id=? AND status='pending' "
+            "ORDER BY accepted_at, receipt_no", (pool_id,))
+        for r in rows:
+            r["amount_wan"] = _dec(r["amount_wan"])
+            r["overshoot"] = bool(r["overshoot"])
+        return rows
+
+    # ---- 收件箱（断点续跑的事实来源，不按到达顺序覆盖事实） ----
+    def quota_inbox_upsert(self, event: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO quota_inbox (digest,event_type,payload_json,received_at,
+                        status,run_id,note) VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(digest) DO UPDATE SET note=excluded.note""",
+                (event["digest"], event["event_type"],
+                 json.dumps(event["payload"], ensure_ascii=False), event["received_at"],
+                 event.get("status", "pending"), event.get("run_id"),
+                 event.get("note", "")))
+
+    def quota_inbox_pending(self) -> list[dict]:
+        rows = self._all(
+            "SELECT * FROM quota_inbox WHERE status='pending' ORDER BY received_at, rowid",
+            ())
+        for r in rows:
+            r["payload"] = json.loads(r.pop("payload_json"))
+        return rows
+
+    def quota_inbox_mark(self, digest: str, status: str, run_id: str | None,
+                        note: str = "") -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE quota_inbox SET status=?, run_id=?, note=? WHERE digest=?",
+                (status, run_id, note, digest))
+
+    def quota_inbox_all(self) -> list[dict]:
+        rows = self._all(
+            "SELECT * FROM quota_inbox ORDER BY received_at, rowid", ())
+        for r in rows:
+            r["payload"] = json.loads(r.pop("payload_json"))
+        return rows
+
+    # ---- 运行（checkpoint 落库，中断后续跑只处理 pending） ----
+    def quota_save_run(self, run: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO quota_runs (run_id,status,started_at,finished_at,cursor_digest,
+                        input_digest,processed,skipped,versions_applied,versions_rejected,
+                        receipts_applied,receipts_pending,note)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(run_id) DO UPDATE SET
+                     status=excluded.status, finished_at=excluded.finished_at,
+                     cursor_digest=excluded.cursor_digest, processed=excluded.processed,
+                     skipped=excluded.skipped, versions_applied=excluded.versions_applied,
+                     versions_rejected=excluded.versions_rejected,
+                     receipts_applied=excluded.receipts_applied,
+                     receipts_pending=excluded.receipts_pending, note=excluded.note""",
+                (run["run_id"], run["status"], run["started_at"], run.get("finished_at"),
+                 run.get("cursor_digest"), run["input_digest"], int(run.get("processed", 0)),
+                 int(run.get("skipped", 0)), int(run.get("versions_applied", 0)),
+                 int(run.get("versions_rejected", 0)),
+                 int(run.get("receipts_applied", 0)),
+                 int(run.get("receipts_pending", 0)), run.get("note", "")))
+
+    def quota_get_run(self, run_id: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM quota_runs WHERE run_id=?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+    def quota_latest_run(self) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM quota_runs ORDER BY started_at DESC, rowid DESC LIMIT 1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def quota_list_runs(self, limit: int = 30) -> list[dict]:
+        return self._all(
+            "SELECT * FROM quota_runs ORDER BY started_at DESC, rowid DESC LIMIT ?", (limit,))
+
+    def quota_add_event(self, event: dict) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO quota_events (run_id,digest,event_type,action,code,detail,
+                        created_at) VALUES (?,?,?,?,?,?,?)""",
+                (event["run_id"], event["digest"], event["event_type"], event["action"],
+                 event["code"], event.get("detail", ""), event["created_at"]))
+
+    def quota_load_events(self, run_id: str | None = None) -> list[dict]:
+        if run_id:
+            return self._all(
+                "SELECT * FROM quota_events WHERE run_id=? ORDER BY id", (run_id,))
+        return self._all("SELECT * FROM quota_events ORDER BY id", ())
 
     def _all(self, sql: str, args: tuple) -> list[dict]:
         with self.connect() as conn:

@@ -17,6 +17,9 @@
 - **导出**：可申报清单 CSV、隔离 CSV、链版本 CSV、运行清单 JSON、对账 JSON；页面与导出规则一致。
 - **复核与回放**：冲突链人工裁定（选版 + 裁定人 + 依据）、按公告号逐版回放、撤销后非法迁移拦截、
   >20 版超长链线性合并、裁定后清单与自动清单并存且逐字段留差异。
+- **额度账本**：额度公告按版本成链（首发/更正/撤销），受理回执钉在受理时刻有效的版本上；
+  更正晚到不重算旧受理、不冻结总额——新申报按更正后总额看可用余额；切换失败保留上一完整额度版本，
+  中断从已确认更正续跑、重跑不重复占用；总额/占用/可用/超额缺口逐项可对账，页面与五类导出同一套数。
 
 ## 模块
 
@@ -29,6 +32,7 @@
 | M5 批次与续跑 | 查历史、续跑、幂等重跑 | `GET /api/batches`、`POST /api/batches/{id}/resume` | `/batches` |
 | M6 复核与导出 | 四账复核与五类导出 | `GET /api/export` | `/export` |
 | M7 复核与回放 | 冲突链裁定、按公告号回放、裁定后重算 | `GET /api/review`、`GET /api/review/replay`、`POST /api/review/ruling` | `/review` |
+| M8 额度账本 | 事件收件、处理/续跑、版本时间线、占用快照、新申报预检 | `POST /api/quota/process`、`POST /api/quota/resume`、`GET /api/quota/dashboard`、`GET /api/quota/precheck` | `/quota`、`/quota/{pool_id}` |
 
 深度登记（功能模块表、14 条 TRAP 表、反例与不变量）：`docs/DEPTH.md`；字段契约：`docs/DATA-DICTIONARY.md`。
 
@@ -62,10 +66,19 @@ docker compose up -d --build
 5. `/export` 看四账与运行清单，下载五类文件。
 6. `/review` 看 3 条冲突链，选 `澄科技发〔2026〕21号` 回放两版证据；裁定人填 2 字以上、依据填 6 字以上，
    提交后状态从「冲突隔离」变为人工结论，改判差异逐字段列出，自动值仍留在留痕里。
+7. 额度账本演示（回执先到、更正晚到、顺序打乱）：
+   ```bash
+   curl -sS -X POST http://localhost:18200/api/quota/process \
+     -H 'content-type: application/json' --data-binary @sample_data/quota_events.json
+   ```
+   打开 `/quota`：TECH 池 v1 钉版占用 900（不随更正重算），v2 当前总额 800、可用 650；
+   时间倒挂的 v3 留 rejected 且指针不动；GREEN 池受理即超占记缺口 100 后撤销。口径见
+   `sample_data/QUOTA-README.md`。
 
 ## 规则与已知不覆盖
 
 - 金额 Decimal（万元，2 位）；时间入库 UTC、展示 +08:00；工作日区间左闭右开。
+- 额度账本：受理回执按受理时刻钉版，更正只动当前版本指针；可用余额截 0 不出负数，超占走超额缺口。
 - 中文数字截止（`三十个工作日`）不支持，按 `Q_BAD_DEADLINE_RULE` 隔离。
 - 节假日表只维护 2026 年；样例站门户 B 第 2 页之后的公告未落文件（记 `E_PAGING_NO_NEXT` 断点）。
 - 完整清单见 `docs/DEPTH.md` 的「已知不覆盖」。
@@ -73,13 +86,13 @@ docker compose up -d --build
 ## 目录
 
 ```text
-app/                 main/config/errors/reasons/manifest/store/web + modules/m1..m7
-app/templates/       base + 7 个页面（采集/清单/链详情/隔离/复核/批次/导出）
-app/static/          theme.css（令牌）layout.css（骨架）components.css（元件）+ 3 个 js
+app/                 main/config/errors/reasons/manifest/store/web + modules/m1..m8
+app/templates/       base + 8 个页面（采集/清单/链详情/隔离/复核/批次/导出/额度账本）
+app/static/          theme.css（令牌）layout.css（骨架）components.css（元件）+ 4 个 js
 docs/                DEPTH.md（模块表 + TRAP 表）DATA-DICTIONARY.md（字段契约）
 sample_site/         三门户 9 个文件（含 GB18030 页、截断页、附件 CSV、门户导航）
-sample_data/         announcements_dirty.csv（同样的脏数据另存一份，便于离线核对）
-tests/               conftest + 每模块 1 个（含 test_m7_review.py）+ e2e + fixtures/expected.py
+sample_data/         announcements_dirty.csv（同样的脏数据另存一份，便于离线核对）+ quota_events.json（M8 乱序事件）
+tests/               conftest + 每模块 1 个（含 test_m7_review.py、test_quota.py）+ e2e + fixtures/expected.py
 ```
 
 ## 测试
@@ -88,4 +101,5 @@ tests/               conftest + 每模块 1 个（含 test_m7_review.py）+ e2e 
 docker compose exec -T app pytest -q
 ```
 
-96 条测试（容器内 96 passed），覆盖 7 个模块（每模块 ≥7 条）与 14 条 TRAP；含 5 条反例、5 条不变量与端到端。
+115 条测试（容器内 115 passed），覆盖 8 个模块（每模块 ≥7 条）与 21 条 TRAP；含反例、不变量与端到端。
+（本地无样例站 HTTP 时 `test_http_sample_site_optional` 跳过，其余 114 条均可离线运行。）

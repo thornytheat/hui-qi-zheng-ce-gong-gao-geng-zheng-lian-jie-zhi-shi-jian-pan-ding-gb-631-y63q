@@ -17,9 +17,10 @@ from .modules.m4_chain import handler as m4_handler
 from .modules.m5_batches import handler as m5_handler
 from .modules.m6_export import handler as m6_handler
 from .modules.m7_review import handler as m7_handler
+from .modules.m8_quota import handler as m8_handler
 
 MODULES = (m1_handler, m2_handler, m3_handler, m4_handler, m5_handler, m6_handler,
-           m7_handler)
+           m7_handler, m8_handler)
 
 
 def create_app(settings: config.Settings | None = None) -> FastAPI:
@@ -42,8 +43,9 @@ def create_app(settings: config.Settings | None = None) -> FastAPI:
     def _head_ok() -> Response:
         return Response(status_code=200, media_type="text/html; charset=utf-8")
 
-    for path in ("/", "/policies", "/quarantine", "/batches", "/export", "/review",
-                 "/policies/{doc_no:path}", "/healthz"):
+    for path in ("/", "/policies", "/quota", "/quarantine", "/batches", "/export",
+                 "/review", "/policies/{doc_no:path}", "/quota/{pool_id:path}",
+                 "/healthz"):
         app.add_api_route(path, _head_ok, methods=["HEAD"], include_in_schema=False)
 
     @app.get("/healthz", include_in_schema=False)
